@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, Box, Text } from 'ink';
+import { resolveContext } from './config.js';
 
 export function run(argv: string[] = process.argv.slice(2)): void {
   void argv;
@@ -11,9 +12,12 @@ export function run(argv: string[] = process.argv.slice(2)): void {
     return;
   }
 
+  const ctx = resolveContext({ argv });
+
   render(
-    <Box>
+    <Box flexDirection="column">
       <Text>busycode</Text>
+      <Text dimColor>{ctx.statusLine}</Text>
     </Box>,
   );
 }
