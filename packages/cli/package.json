@@ -20,7 +20,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
-    "test": "node --import tsx --test src/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
     "chalk": "^5.4.0",
