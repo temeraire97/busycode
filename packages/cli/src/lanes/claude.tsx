@@ -288,7 +288,7 @@ export function ClaudeLane({ ctx }: { ctx: ClaudeContext }) {
         {isRunning && activeStep && <ActiveToolCard event={activeStep} palette={palette} frame={frame} />}
       </Box>
 
-      <Box marginY={1}>
+      <Box>
         <Text color={palette.divider}>{'─'.repeat(width)}</Text>
       </Box>
 
@@ -302,7 +302,7 @@ export function ClaudeLane({ ctx }: { ctx: ClaudeContext }) {
         </Box>
       )}
 
-      <Box marginY={1}>
+      <Box>
         <Text color={palette.divider}>{'─'.repeat(width)}</Text>
       </Box>
 
