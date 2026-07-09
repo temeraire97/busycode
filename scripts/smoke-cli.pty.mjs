@@ -32,6 +32,7 @@ import errno, fcntl, json, os, pty, select, signal, struct, sys, termios, time
 
 cli_path = sys.argv[1]
 timeout_s = float(sys.argv[2])
+sigint_after_s = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
 
 pid, fd = pty.fork()
 if pid == 0:
@@ -47,11 +48,23 @@ start = time.time()
 buf = b''
 exited = False
 exit_code = None
+status = None
+sigint_sent = False
 
 while True:
-    remaining = timeout_s - (time.time() - start)
+    now = time.time()
+    remaining = timeout_s - (now - start)
     if remaining <= 0:
         break
+    if sigint_after_s > 0 and not sigint_sent and (now - start) >= sigint_after_s:
+        try:
+            # raw mode is not enabled on the pty, so the line discipline's
+            # ISIG turns this byte into a real SIGINT for the foreground
+            # process group (same as a user pressing Ctrl+C).
+            os.write(fd, b'\\x03')
+        except OSError:
+            pass
+        sigint_sent = True
     try:
         ready, _, _ = select.select([fd], [], [], min(1.0, remaining))
     except Exception:
@@ -78,8 +91,9 @@ while True:
                 pass
             break
         buf += chunk
-    wpid, status = os.waitpid(pid, os.WNOHANG)
+    wpid, wstatus = os.waitpid(pid, os.WNOHANG)
     if wpid == pid:
+        status = wstatus
         exited = True
         exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
         break
@@ -105,44 +119,88 @@ result = {
     'hasExplore': 'Explore(Deep codebase exploration)' in text,
     'hasRunBuild': 'Run(pnpm run build)' in text,
     'byteLength': len(buf),
+    'hasAltEnter': '\\x1b[?1049h' in text,
+    'hasAltLeave': '\\x1b[?1049l' in text,
+    'hasCursorShow': '\\x1b[?25h' in text,
+    'altLeaveAfterContent': text.rfind('\\x1b[?1049l') > text.rfind('Run(pnpm run build)'),
+    'termSignal': os.WTERMSIG(status) if status is not None and os.WIFSIGNALED(status) else None,
 }
 print('SMOKE_RESULT:' + json.dumps(result))
 `;
 
-const proc = spawnSync('python3', ['-c', pyHarness, cliPath, String(timeoutSec)], {
-  encoding: 'utf8',
-  timeout: (timeoutSec + 15) * 1000,
-});
+function runScenario(label, { sigintAfterS = 0, scenarioTimeoutS = timeoutSec } = {}) {
+  const proc = spawnSync(
+    'python3',
+    ['-c', pyHarness, cliPath, String(scenarioTimeoutS), String(sigintAfterS)],
+    {
+      encoding: 'utf8',
+      timeout: (scenarioTimeoutS + 15) * 1000,
+    },
+  );
 
-if (proc.error) {
-  console.error('smoke-cli.pty: failed to spawn python3 pty harness:', proc.error);
-  process.exit(1);
+  if (proc.error) {
+    console.error(`smoke-cli.pty [${label}]: failed to spawn python3 pty harness:`, proc.error);
+    process.exit(1);
+  }
+
+  const stdout = proc.stdout ?? '';
+  const resultLine = stdout.split('\n').find((line) => line.startsWith('SMOKE_RESULT:'));
+
+  if (!resultLine) {
+    console.error(`smoke-cli.pty [${label}]: no SMOKE_RESULT from harness.`);
+    console.error('--- harness stdout ---\n' + stdout);
+    console.error('--- harness stderr ---\n' + (proc.stderr ?? ''));
+    process.exit(1);
+  }
+
+  const result = JSON.parse(resultLine.slice('SMOKE_RESULT:'.length));
+  console.log(`smoke-cli.pty [${label}] observed:`, result);
+  return result;
 }
 
-const stdout = proc.stdout ?? '';
-const resultLine = stdout.split('\n').find((line) => line.startsWith('SMOKE_RESULT:'));
-
-if (!resultLine) {
-  console.error('smoke-cli.pty: no SMOKE_RESULT from harness.');
-  console.error('--- harness stdout ---\n' + stdout);
-  console.error('--- harness stderr ---\n' + (proc.stderr ?? ''));
-  process.exit(1);
-}
-
-const result = JSON.parse(resultLine.slice('SMOKE_RESULT:'.length));
-console.log('smoke-cli.pty observed:', result);
+// ---------------------------------------------------------------------------
+// Scenario 1: full replay — original 5 assertions (unmodified, M1 regression
+// guard) plus the new alt-screen lifecycle assertions.
+// ---------------------------------------------------------------------------
+const full = runScenario('full-replay', { scenarioTimeoutS: timeoutSec });
 
 const failures = [];
-if (result.escClearCount <= 0) failures.push('expected ESC[2K line-clears > 0 (spinner never ticked — M1 regression)');
-if (!result.hasExplore) failures.push('expected "Explore(Deep codebase exploration)" (first event) to render');
-if (!result.hasRunBuild) failures.push('expected "Run(pnpm run build)" (final event) to render — replay did not drain');
-if (!result.exited) failures.push(`process did not exit within ${timeoutSec}s (possible hang / orphan risk)`);
-if (result.exited && result.exitCode !== 0) failures.push(`process exited with code ${result.exitCode}, expected 0`);
+if (full.escClearCount <= 0) failures.push('expected ESC[2K line-clears > 0 (spinner never ticked — M1 regression)');
+if (!full.hasExplore) failures.push('expected "Explore(Deep codebase exploration)" (first event) to render');
+if (!full.hasRunBuild) failures.push('expected "Run(pnpm run build)" (final event) to render — replay did not drain');
+if (!full.exited) failures.push(`process did not exit within ${timeoutSec}s (possible hang / orphan risk)`);
+if (full.exited && full.exitCode !== 0) failures.push(`process exited with code ${full.exitCode}, expected 0`);
+if (!full.hasAltEnter) failures.push('expected \\x1b[?1049h (alt-screen enter) in output');
+if (!full.hasAltLeave) failures.push('expected \\x1b[?1049l (alt-screen leave) in output');
+if (!full.hasCursorShow) failures.push('expected \\x1b[?25h (cursor show) in output');
+if (!full.altLeaveAfterContent) failures.push('expected alt-screen leave to occur after the final replay content, not before');
 
 if (failures.length > 0) {
-  console.error('smoke-cli.pty FAILED:\n - ' + failures.join('\n - '));
+  console.error('smoke-cli.pty FAILED [full-replay]:\n - ' + failures.join('\n - '));
   process.exit(1);
 }
 
-console.log(`smoke-cli.pty PASSED in ${result.wallMs}ms (exit 0, spinner ticked, full 9-event replay drained)`);
+console.log(`smoke-cli.pty PASSED [full-replay] in ${full.wallMs}ms (exit 0, spinner ticked, full 9-event replay drained, alt-screen lifecycle correct)`);
+
+// ---------------------------------------------------------------------------
+// Scenario 2: SIGINT mid-replay — assert alt-screen restore happens even on
+// an interrupted run, and the process dies by SIGINT rather than hanging.
+// ---------------------------------------------------------------------------
+const sigintTimeoutS = 15;
+const sigint = runScenario('sigint-mid-replay', { sigintAfterS: 3, scenarioTimeoutS: sigintTimeoutS });
+
+const sigintFailures = [];
+if (!sigint.hasAltLeave) sigintFailures.push('expected \\x1b[?1049l (alt-screen leave) after SIGINT');
+if (!sigint.hasCursorShow) sigintFailures.push('expected \\x1b[?25h (cursor show) after SIGINT');
+if (!(sigint.termSignal === 2 || sigint.exitCode === 130)) {
+  sigintFailures.push(`expected SIGINT death (termSignal 2 or exitCode 130), got termSignal=${sigint.termSignal} exitCode=${sigint.exitCode}`);
+}
+if (!sigint.exited) sigintFailures.push(`process did not exit within ${sigintTimeoutS}s after SIGINT (possible hang)`);
+
+if (sigintFailures.length > 0) {
+  console.error('smoke-cli.pty FAILED [sigint-mid-replay]:\n - ' + sigintFailures.join('\n - '));
+  process.exit(1);
+}
+
+console.log(`smoke-cli.pty PASSED [sigint-mid-replay] in ${sigint.wallMs}ms (alt-screen restored, SIGINT death, no hang)`);
 process.exit(0);

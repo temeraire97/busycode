@@ -2,6 +2,7 @@ import { render } from 'ink';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolveContext } from './config.js';
+import { installErrorSurfacing } from './fullscreen.js';
 import { selectLane } from './lanes/index.js';
 
 function readVersion(): string {
@@ -25,6 +26,7 @@ Options:
   --theme <name>    Color theme: dark | light (default: dark)
   --light           Shortcut for --theme light
   --dark            Shortcut for --theme dark
+  --infinite        Loop the replay until interrupted (Ctrl+C)
   -v, --version     Print version and exit
   -h, --help        Print this help and exit
 
@@ -52,9 +54,20 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<void>
   }
 
   const ctx = resolveContext({ argv });
+  const infinite = argv.includes('--infinite');
   const lane = selectLane('claude'); // P2: single lane fixed
-  const instance = render(lane.render(ctx));
-  await instance.waitUntilExit(); // drain -> exit() inside the lane -> process exits 0
+  const instance = render(lane.render(ctx, { infinite }), { alternateScreen: true });
+  const disposeErrorSurfacing = installErrorSurfacing(() => instance.unmount());
+  try {
+    await instance.waitUntilExit(); // drain -> exit() inside the lane -> process exits 0
+  } catch (err) {
+    // handleAppExit(error) 경로 — unmount는 이미 수행됨(restore 완료 상태)
+    const text = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    process.stderr.write(`\n${text}\n`);
+    process.exitCode = 1;
+  } finally {
+    disposeErrorSurfacing();
+  }
 }
 
 // side-effect-free import (M5): only auto-run when invoked as the bin entry,

@@ -2,9 +2,13 @@ import type { ReactElement } from 'react';
 import type { ClaudeContext } from '../config.js';
 import { ClaudeLane } from './claude.js';
 
+export interface LaneOptions {
+  infinite?: boolean; // --infinite: loop the replay instead of drain -> exit
+}
+
 export interface Lane {
   id: string;
-  render: (ctx: ClaudeContext) => ReactElement;
+  render: (ctx: ClaudeContext, options?: LaneOptions) => ReactElement;
 }
 
 /**
@@ -22,6 +26,6 @@ export function selectLane(id: string): Lane {
   switch (id) {
     case 'claude':
     default:
-      return { id: 'claude', render: (ctx) => <ClaudeLane ctx={ctx} /> };
+      return { id: 'claude', render: (ctx, options) => <ClaudeLane ctx={ctx} infinite={options?.infinite} /> };
   }
 }

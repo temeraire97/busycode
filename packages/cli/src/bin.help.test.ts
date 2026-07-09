@@ -24,21 +24,26 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
 test('run(["--version"]) prints a semver line and does not render', async () => {
   const out = await captureStdout(() => run(['--version']));
   assert.match(out, /^\d+\.\d+\.\d+\n$/);
+  assert.ok(!out.includes('\x1b[?1049h'));
 });
 
 test('run(["-v"]) also prints version (short flag)', async () => {
   const out = await captureStdout(() => run(['-v']));
   assert.match(out, /^\d+\.\d+\.\d+\n$/);
+  assert.ok(!out.includes('\x1b[?1049h'));
 });
 
 test('run(["--help"]) prints usage and is neutral (no real paths)', async () => {
   const out = await captureStdout(() => run(['--help']));
   assert.match(out, /Usage:/);
+  assert.match(out, /--infinite\s+Loop the replay until interrupted \(Ctrl\+C\)/);
   assert.doesNotMatch(out, /\/Users\//);
   assert.doesNotMatch(out, /~\/Desktop/);
+  assert.ok(!out.includes('\x1b[?1049h'));
 });
 
 test('run(["-h"]) also prints usage (short flag)', async () => {
   const out = await captureStdout(() => run(['-h']));
   assert.match(out, /Usage:/);
+  assert.ok(!out.includes('\x1b[?1049h'));
 });
