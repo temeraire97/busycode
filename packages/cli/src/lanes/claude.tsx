@@ -15,22 +15,22 @@ import type { ClaudeContext } from '../config.js';
 // rest of this file always goes through `p.<name>`, never an inline hex.
 // ---------------------------------------------------------------------------
 
-interface ClaudePalette {
+export interface ClaudePalette {
   green: string; // shell '›' prompt
-  fg: string; // default tool title/icon + welcome-card meta text
+  fg: string | undefined; // default tool title/icon + welcome-card meta text
   purpleUltra: string; // ultra tool title/icon (title.includes('Thinking'))
-  toolLine: string; // tool detail lines, welcome-card meta/path/copy
+  toolLine: string | undefined; // tool detail lines, welcome-card meta/path/copy
   thinking: string; // active thinking line (non-ultra)
   thinkingUltra: string; // active thinking line (activeStep.ultra)
   orange: string; // card border, section titles, inner divider
-  welcome: string; // welcome heading, composer prompt, /init inline
-  userBg: string; // user line full-bleed background approximation
-  userFg: string; // user line foreground
+  welcome: string | undefined; // welcome heading, composer prompt, /init inline
+  userBg: string | undefined; // user line full-bleed background approximation
+  userFg: string | undefined; // user line foreground
   statusPrimary: string; // bottom status row (ctx.statusLine)
   divider: string; // horizontal dividers
 }
 
-const DARK_PALETTE: ClaudePalette = {
+export const DARK_PALETTE: ClaudePalette = {
   green: '#7ef39b',
   fg: '#ece8e3',
   purpleUltra: '#d9b8ff',
@@ -47,12 +47,25 @@ const DARK_PALETTE: ClaudePalette = {
 
 /**
  * The web fake (`src/App.tsx` + `App.css`) only ever defines a *dark*
- * palette — there is no light-theme CSS to port faithfully. Until a light
- * theme is designed for the web app, `ctx.theme === 'light'` falls back to
- * the same dark palette rather than fabricating unproven colors.
+ * palette — there is no light-theme CSS to port faithfully. Rather than
+ * fabricating unverified light-mode hex values, the near-white body-fg
+ * fields fall back to `undefined` so Ink inherits the terminal's own
+ * default foreground (legible on a light background). Accent hues
+ * (green/orange/thinking/thinkingUltra/purpleUltra/statusPrimary/divider)
+ * are kept identical to DARK_PALETTE — those are verified against
+ * `App.css` and theme-independent.
  */
-function paletteFor(_theme: ClaudeContext['theme']): ClaudePalette {
-  return DARK_PALETTE;
+export const LIGHT_PALETTE: ClaudePalette = {
+  ...DARK_PALETTE,
+  fg: undefined, // inherit terminal default fg
+  welcome: undefined,
+  userFg: undefined,
+  toolLine: undefined,
+  userBg: undefined, // avoid a dark highlight block on a light background
+};
+
+export function paletteFor(theme: ClaudeContext['theme']): ClaudePalette {
+  return theme === 'light' ? LIGHT_PALETTE : DARK_PALETTE;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +206,6 @@ export function ClaudeLane({ ctx }: { ctx: ClaudeContext }) {
         activeStepRef.current = nextEvent;
         scheduleNext(nextEvent.duration); // duration = dwell time, not load time
       }, delay);
-      timer.unref?.();
     };
 
     scheduleNext(400); // lead-in
@@ -208,7 +220,6 @@ export function ClaudeLane({ ctx }: { ctx: ClaudeContext }) {
     const iv = setInterval(() => {
       setFrame((current) => (current + 1) % claudeThinkingFrames.length);
     }, 420);
-    iv.unref?.();
 
     return () => clearInterval(iv);
   }, [hasStarted, isRunning]);
@@ -217,7 +228,6 @@ export function ClaudeLane({ ctx }: { ctx: ClaudeContext }) {
   useEffect(() => {
     if (!isRunning && hasStarted && timelineIndexRef.current >= claudeTimeline.length) {
       const t = setTimeout(() => exit(), 1200);
-      t.unref?.();
       return () => clearTimeout(t);
     }
     return undefined;

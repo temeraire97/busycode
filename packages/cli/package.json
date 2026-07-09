@@ -2,6 +2,7 @@
   "name": "busycode-cli",
   "version": "0.1.0",
   "private": false,
+  "license": "MIT",
   "description": "BusyCode terminal-native CLI simulator",
   "type": "module",
   "bin": {
@@ -11,7 +12,9 @@
     ".": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22"
